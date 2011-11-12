@@ -1,5 +1,6 @@
 package play.classloading.enhancers;
 
+import java.io.File;
 import java.util.Arrays;
 import java.util.Stack;
 
@@ -22,8 +23,10 @@ import bytecodeparser.analysis.stack.StackAnalyzer.Frames;
 import bytecodeparser.analysis.stack.StackAnalyzer.Frames.FrameIterator;
 import bytecodeparser.utils.Utils;
 import play.Logger;
+import play.Play;
 import play.classloading.ApplicationClasses.ApplicationClass;
 import play.exceptions.UnexpectedException;
+import play.libs.Codec;
 
 public class LVEnhancer extends Enhancer {
     @Override
@@ -110,6 +113,8 @@ public class LVEnhancer extends Enhancer {
         applicationClass.enhancedByteCode = ctClass.toBytecode();
         ctClass.defrost();
     }
+    
+    private static final long startedAt = System.currentTimeMillis();
 
     private static void insert(String stmt, CtClass ctClass, CtBehavior behavior, CodeAttribute codeAttribute, FrameIterator iterator, Frame frame, boolean after) throws CompileError, BadBytecode, NotFoundException {
         Javac jv = new Javac(ctClass);
@@ -121,8 +126,27 @@ public class LVEnhancer extends Enhancer {
         Bytecode b = jv.getBytecode();
         int locals = b.getMaxLocals();
         codeAttribute.setMaxLocals(locals);
-        iterator.insert(b.get(), after);
-        codeAttribute.setMaxStack(codeAttribute.computeMaxStack());
+        File debugDir = new File(Play.applicationPath, "lvenhancer-debug-" + startedAt);
+        if(!debugDir.exists())
+            debugDir.mkdir();
+        debugDir = new File(debugDir, ctClass.getName() + "." + behavior.getName() + "-" + Codec.UUID());
+        debugDir.mkdir();
+        ctClass.debugWriteFile(debugDir.getAbsolutePath());
+        try {
+            iterator.insert(b.get(), after);
+        } catch (BadBytecode bb) {
+            Logger.error(bb, "(check in lvenhancer-debug-%s) error while applying LVEnhancer on %s", startedAt, behavior.getLongName());
+            Logger.error("with statement: \n\t%s\n\nproduced:\n\t%s", stmt, Codec.byteToHexString(b.get()));
+            throw bb;
+        }
+        try {
+            codeAttribute.setMaxStack(codeAttribute.computeMaxStack());
+        } catch (BadBytecode bb) {
+            Logger.error(bb, "(check in lvenhancer-debug-%s) [computeMaxStack] error while applying LVEnhancer on %s", startedAt, behavior.getLongName());
+            Logger.error("with statement: \n\t%s\n\nproduced:\n\t%s", stmt, Codec.byteToHexString(b.get()));
+            throw bb;
+        }
+        debugDir.delete();
     }
 
     private static Integer computeMethodHash(CtClass[] parameters) {
