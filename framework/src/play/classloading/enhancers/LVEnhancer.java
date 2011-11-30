@@ -33,7 +33,7 @@ public class LVEnhancer extends Enhancer {
     public void enhanceThisClass(ApplicationClass applicationClass)
             throws Exception {
         CtClass ctClass = makeClass(applicationClass);
-        if(ctClass.isAnnotation())
+        if(ctClass.isAnnotation() || ctClass.isInterface())
             return;
         for(CtBehavior behavior : ctClass.getDeclaredMethods()) {
             try {
