@@ -12,8 +12,8 @@ import javassist.NotFoundException;
 import javassist.bytecode.BadBytecode;
 import javassist.bytecode.Bytecode;
 import javassist.bytecode.CodeAttribute;
+import javassist.bytecode.Opcode;
 import javassist.compiler.CompileError;
-import javassist.compiler.Javac;
 import bytecodeparser.analysis.decoders.DecodedMethodInvocationOp;
 import bytecodeparser.analysis.decoders.DecodedMethodInvocationOp.MethodParams;
 import bytecodeparser.analysis.opcodes.ExitOpcode;
@@ -37,13 +37,8 @@ public class LVEnhancer extends Enhancer {
             return;
         for(CtBehavior behavior : ctClass.getDeclaredMethods()) {
             try {
-                /*if(ctClass.getName().equals("controllers.Application")) {
-                    System.out.println("declared method " + behavior.getLongName());
-                }*/
                 if(behavior.isEmpty() || behavior.getMethodInfo().getCodeAttribute() == null || Utils.getLocalVariableAttribute(behavior) == null) {
-                    //System.out.println("declared empty method " + behavior.getLongName() + " (" + Modifier.toString(behavior.getModifiers()) +")");
                     CtField signature = CtField.make("public static String[] $" + behavior.getName() + "0 = new String[0];", ctClass);
-                        //System.out.println("\n\nBEWARE\npublic static String[] $" + behavior.getName() + "0 = new String[0]; in " + ctClass.getName());
                     ctClass.addField(signature);
                     continue;
                 }
@@ -75,9 +70,6 @@ public class LVEnhancer extends Enhancer {
                 }
 
                 CtField signature = CtField.make("public static String[] $" + behavior.getName() + computeMethodHash(signatureTypes) + " = " + signatureNames.toString(), ctClass);
-                /*if(ctClass.getName().equals("controllers.Application")) {
-                    System.out.println("public static String[] $" + behavior.getName() + computeMethodHash(signatureTypes) + " = " + signatureNames.toString() + " is now " + Modifier.toString(signature.getModifiers()));
-                }*/
                 ctClass.addField(signature);
                 // end
 
@@ -92,42 +84,29 @@ public class LVEnhancer extends Enhancer {
                     }
                     if(frame.decodedOp instanceof DecodedMethodInvocationOp) {
                         DecodedMethodInvocationOp dmio = (DecodedMethodInvocationOp) frame.decodedOp;
-                        //StringBuffer stmt = new StringBuffer("{");
-                        MethodParams methodParams = DecodedMethodInvocationOp.resolveParameters(frame);
-                        
-                        String[] paramsNames = new String[methodParams.params.length + (methodParams.varargs != null ? methodParams.varargs.length : 0)];
-                        for(int i = 0; i < methodParams.params.length; i++)
-                            if(methodParams.params[i] != null && methodParams.params[i].name != null)
-                                paramsNames[i] = methodParams.params[i].name;
-                        if(methodParams.varargs != null)
-                            for(int i = 0, j = methodParams.params.length; i < methodParams.varargs.length; i++, j++)
-                                if(methodParams.varargs[i] != null && methodParams.varargs[i].name != null)
-                                    paramsNames[j] = methodParams.varargs[i].name;
-                        
-                        /*stmt.append("String[] $$paramNames = new String[").append(methodParams.params.length + (methodParams.varargs != null ? methodParams.varargs.length : 0)).append("];");
-                        for(int i = 0; i < methodParams.params.length; i++)
-                            if(methodParams.params[i] != null && methodParams.params[i].name != null)
-                                stmt.append("$$paramNames[").append(i).append("] = \"").append(methodParams.params[i].name).append("\";");
-                        if(methodParams.varargs != null)
-                            for(int i = 0, j = methodParams.params.length; i < methodParams.varargs.length; i++, j++)
-                                if(methodParams.varargs[i] != null && methodParams.varargs[i].name != null)
-                                    stmt.append("$$paramNames[").append(j).append("] = \"").append(methodParams.varargs[i].name).append("\";");*/
+                        if(!dmio.getDeclaringClassName().equals("org.apache.commons.javaflow.bytecode.StackRecorder") &&
+                                !dmio.getDeclaringClassName().startsWith("java.")) { // no need to track non-user method calls
+                            MethodParams methodParams = DecodedMethodInvocationOp.resolveParameters(frame);
+                            
+                            String[] paramsNames = new String[methodParams.params.length + (methodParams.varargs != null ? methodParams.varargs.length : 0)];
+                            for(int i = 0; i < methodParams.params.length; i++)
+                                if(methodParams.params[i] != null && methodParams.params[i].name != null)
+                                    paramsNames[i] = methodParams.params[i].name;
+                            if(methodParams.varargs != null)
+                                for(int i = 0, j = methodParams.params.length; i < methodParams.varargs.length; i++, j++)
+                                    if(methodParams.varargs[i] != null && methodParams.varargs[i].name != null)
+                                        paramsNames[j] = methodParams.varargs[i].name;
 
-                        Bytecode b = makeInitMethodCall(behavior, dmio.getName(), dmio.getNbParameters(), methodParams.subject != null ? methodParams.subject.name : null, paramsNames);
-                        insert(b, ctClass, behavior, codeAttribute, iterator, frame, false);
-                        /*stmt.append("play.classloading.enhancers.LVEnhancer.LVEnhancerRuntime.initMethodCall(\"" + dmio.getName() + "\", " + dmio.getNbParameters() + ", " + (methodParams.subject != null ? ("\"" + methodParams.subject + "\"") : "null") + ", $$paramNames);");
-                        stmt.append("}");
-
-                        insert(stmt.toString(), ctClass, behavior, codeAttribute, iterator, frame, false);*/
+                            Bytecode b = makeInitMethodCall(behavior, dmio.getName(), dmio.getNbParameters(), methodParams.subject != null ? methodParams.subject.name : null, paramsNames);
+                            insert(b, ctClass, behavior, codeAttribute, iterator, frame, false);
+                        }
                     }
                     if(frame.decodedOp.op instanceof ExitOpcode) {
                         Bytecode b = makeExitMethod(behavior, ctClass.getName(), behavior.getName(), behavior.getSignature());
                         insert(b, ctClass, behavior, codeAttribute, iterator, frame, false);
-                        //insert("play.classloading.enhancers.LVEnhancer.LVEnhancerRuntime.exitMethod(\""+ ctClass.getName() + "\", \"" + behavior.getName() + "\", \"" + behavior.getSignature() + "\");", ctClass, behavior, codeAttribute, iterator, frame, false);
                     }
                     if(iterator.isFirst()) {
                         insert(makeEnterMethod(behavior, ctClass.getName(), behavior.getName(), behavior.getSignature()), ctClass, behavior, codeAttribute, iterator, frame, false);
-                        //insert("play.classloading.enhancers.LVEnhancer.LVEnhancerRuntime.enterMethod(\""+ ctClass.getName() + "\", \"" + behavior.getName() + "\", \"" + behavior.getSignature() + "\");", ctClass, behavior, codeAttribute, iterator, frame, false);
                     }
                 }
             } catch(Exception e) {
@@ -145,23 +124,22 @@ public class LVEnhancer extends Enhancer {
         b.addLdc(method);
         b.addIconst(nbParameters);
         if(subject == null)
-            b.add(b.ACONST_NULL);
+            b.add(Opcode.ACONST_NULL);
         else b.addLdc(subject);
         b.addIconst(names.length);
         b.addAnewarray("java.lang.String");
         for(int i = 0; i < names.length; i++) {
             if(names[i] != null)
-                b.add(b.DUP);
+                b.add(Opcode.DUP);
         }
         for(int i = 0; i < names.length; i++) {
             if(names[i] != null) {
                 b.addIconst(i);
                 b.addLdc(names[i]);
-                b.add(b.AASTORE);
+                b.add(Opcode.AASTORE);
             }
         }
         b.addInvokestatic("play.classloading.enhancers.LVEnhancer$LVEnhancerRuntime", "initMethodCall", "(Ljava/lang/String;ILjava/lang/String;[Ljava/lang/String;)V");
-        //System.out.println("makeInitMethodCall => " + b.length());
         return b;
     }
     
@@ -208,17 +186,6 @@ public class LVEnhancer extends Enhancer {
             throw bb;
         }
         debugDir.delete();
-    }
-
-    private static void insert(String stmt, CtClass ctClass, CtBehavior behavior, CodeAttribute codeAttribute, FrameIterator iterator, Frame frame, boolean after) throws CompileError, BadBytecode, NotFoundException {
-        Javac jv = new Javac(ctClass);
-        jv.recordLocalVariables(codeAttribute, frame.index);
-        jv.recordParams(behavior.getParameterTypes(), Modifier.isStatic(behavior.getModifiers()));
-        jv.setMaxLocals(codeAttribute.getMaxLocals());
-        jv.compileStmnt(stmt);
-
-        Bytecode b = jv.getBytecode();
-        insert(b, ctClass, behavior, codeAttribute, iterator, frame, after);
     }
 
     private static Integer computeMethodHash(CtClass[] parameters) {
@@ -277,10 +244,7 @@ public class LVEnhancer extends Enhancer {
         }
 
         public static void initMethodCall(String method, int nbParams, String subject, String[] paramNames) {
-            /*if(!("<init>".equals(method) || "equals".equals(method) || "compareTo".equals(method)))
-                System.out.println("init method call " + method + Arrays.toString(paramNames));*/
             getCurrentMethodParams().peek().currentNestedMethodCall = new MethodExecution(subject, paramNames, nbParams);
-            Logger.trace("initMethodCall for '" + method + "' with " + Arrays.toString(paramNames));
         }
         
         /**
